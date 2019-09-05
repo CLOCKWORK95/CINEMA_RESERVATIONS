@@ -1,27 +1,15 @@
-#include <sys/socket.h>       /*  socket definitions        */
-#include <sys/types.h>        /*  socket types              */
-#include <arpa/inet.h>        /*  inet (3) funtions         */
-#include <unistd.h>           /*  misc. UNIX functions      */
-#include <netinet/in.h>
-#include <netdb.h>
-#include "support.h"  
-#include "support.c"            
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <semaphore.h>
-#include <sys/sem.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include "header.h"
+#include "support.c"
 
-
-#define MAX_CONNECTIONS 10
 
 #define MAX_PENDING 5
 
 
-int     socket_descriptor,       num_conns = 0;
+int                     socket_descriptor,       num_conns = 0;
+
+//mutex for synchronized threads' access on files 'cinema' and 'cinema_prenotazioni'.
+pthread_mutex_t         CINEMA_MUTEX = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t         CINEMA_RESERVATIONS_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
 struct sockaddr_in      my_address,     their_address;
                                                         
@@ -39,8 +27,6 @@ typedef struct concurrent_connection_ {
 
 __thread int    descr,       my_conn_num,       file_descriptor;    
 
-__thread FILE   *f;
-
 __thread seat   *seats_vector,      *reservation_seats;
 
 
@@ -49,8 +35,9 @@ __thread seat   *seats_vector,      *reservation_seats;
 
 void * connection_handler ( void * attr);
 
-
 void send_seats_view();
+
+void reserve_and_confirm();
 
 
 
@@ -82,7 +69,7 @@ int main (int argc, char** argv){
     printf("\n\n    listening to connection requests...\n");
 
     //requests handler loop.
-    while ( num_conns <= MAX_CONNECTIONS ) {
+    while ( 1 ) {
 
 
         ret = accept( socket_descriptor, (struct sockaddr *) &their_address, &addrlen );
@@ -113,9 +100,6 @@ int main (int argc, char** argv){
     }
 
 
-    do  {     pause();    }       while(1);
-
-
     return EXIT_SUCCESS;
     
 }
@@ -133,12 +117,6 @@ void * connection_handler (void * attr) {
     descr = (int) ( (concurrent_connection *) attr ) -> sock_descr;
     my_conn_num = (int) ( (concurrent_connection *) attr ) -> connection_number;
 
-    //open a session on file "cinema", to serve client requests.
-    file_descriptor = open( "cinema", O_RDWR , 0660 );
-    if (file_descriptor == -1)      Error_("error in function: open.", 1);
-
-    f = fdopen( file_descriptor, "r+" );
-    if (f == NULL)      Error_("error in function: fdopen (send seats view).", 1);
 
     //print connection infos on screen.
     printf("\n\n\nThis is thread n° %ld of CINEMA RESERVATION SERVER.", pthread_self() );
@@ -165,10 +143,12 @@ void * connection_handler (void * attr) {
                         break;
 
                 case 2:
+                        reserve_and_confirm();
                         break;
                 
                 default:
                         printf("\ndefault!\n");
+                        sleep(3);
                         break;
             }
         }
@@ -189,13 +169,22 @@ void send_seats_view() {
 
     char    line[MAX_LINE];
 
+    FILE    *f;
 
-    //get the file size.
-    size = (int) lseek( file_descriptor, 0, SEEK_END);  
-    lseek( file_descriptor, 0, SEEK_SET );  
+    pthread_mutex_lock( &CINEMA_MUTEX );
+
+    //open a session on file "cinema", to serve client requests.
+
+    f = fopen( "cinema", "r+" );
+    if (f == NULL)      Error_("error in function: fdopen (send seats view).", 1);
+
+
+    //get the file size and add a newline at the end of it.
+    fseek( f , 0, SEEK_END);  
+    size = ftell( f );
+    fseek( f , 0, SEEK_SET );  
     printf("  -  size of file : %d ", size);  
     fflush(stdout);
-
 
 
     //send number of bytes of file to the client.
@@ -208,30 +197,22 @@ void send_seats_view() {
     memset( line, 0 , strlen(line) );
 
 
+    printf(" - sending all file to client... ");
+                                                                                                            
+    //send all file to the client.
+    ret = Writefile( descr, f );
+    if (ret == -1)      Error_("error in function: Writeline (send seats view).", 1);
 
-    //check the client has received a non null number of lines. 
-    ret = Readline( descr, line, MAX_LINE );
-    if (ret == -1)      Error_("error in function : Readline", 1);
+    printf(" - sent %d bytes.", ret );
 
-    if ( strcmp( line, "NACK\n") == 0 ) goto end;
-
-    if ( strcmp( line, "ACK\n") == 0) {
-
-        printf(" - sending all file to client... ");
-                                                                                                               
-        //send all file to the client.
-        ret = Writefile( descr, f );
-        if (ret == -1)      Error_("error in function: Writeline (send seats view).", 1);
-
-        printf(" - sent %d bytes.", ret );
-
-    }
-
-
-  end:
+    end:
 
     printf("\nrequest served on socket %d.", descr);
     fflush(stdout);
+
+    fclose( f );
+
+    pthread_mutex_unlock( &CINEMA_MUTEX );
     
     return;
 
@@ -240,107 +221,147 @@ void send_seats_view() {
 
 
 
-void reserve_and_confirm(){
+void reserve_and_confirm() {
 
     //validate memory TLS to represent all seats' informations in cinema hall.
-    seats_vector = malloc( sizeof(seat) * 10);
+    seats_vector = malloc( sizeof(seat) * 9);
     if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
 
-    char    *l = NULL,      delimiter[8],       line[15],        *token;
+    char    *l = NULL,      delimiter[10],       *line,        *token;
 
-    int     ret;
-    
-    size_t  len = 0;
+    int     ret,            line_counter = 1;   size_t len;
+
+    seat    *tmp = NULL,       *last = NULL;
+
+    FILE    *f;
+
+    line = malloc( sizeof(char) * 16);
+    if (line == NULL)   Error_("Error in function : malloc (reserve and confirm)", 1);
 
 
-    int line_counter = 1;
+    //ensure atomic transaction.
+    pthread_mutex_lock( &CINEMA_MUTEX ); 
 
-    seat *tmp = NULL;
+    f = fopen( "cinema" , "r+" );
+    if (f == NULL)      Error_("error in function: fopen (send seats view).", 1);
 
 
     /*  by this cycle, parse the 'cinema' file to build linked list structs (seat) 
         containing all current informations of cinema hall. */
 
-    while( getline(&l, &len, f) != -1 &&  line_counter < 11 ) {
+    while( getline(&l, &len, f) != -1 &&  line_counter < 10 ) {
+
+        memset( line, 0, strlen(line) );
+
+        if ( strcmp( l, "\n") == 0 )    goto redo;
 
         //dinamically set delimiter string's value.
-        ret = sprintf( delimiter, "FILA%d ", line_counter);
+        ret = sprintf( delimiter, "FILA%d  ", line_counter);
         if (ret == -1)      Error_("error in function : sprintf", 1);
 
 
         //build a 'line string' containing current reservation values for each place of this (line_counter) line.
-        strcat( line, strtok( l, delimiter ) );
+        token = strtok( l, delimiter );
+        strcat( line, token );
+        memset( token, 0, strlen(token));
         while ( ( token = strtok(NULL, " ") ) != NULL ) {
             strcat( line, token );
+            memset( token, 0, strlen(token));
         }
+
+        printf("\nline: %s", line);fflush(stdout);
 
 
         //set all seats_vector[line_counter] infos.
-        tmp = seats_vector + line_counter;
+        tmp = seats_vector + ( line_counter - 1 );
+
+        seat    *last_seat = NULL;
 
         for (int i = 0; i < strlen(line); i ++) {
 
             tmp -> is_reserved = line[i];
             tmp -> line = line_counter;
-            tmp -> place = i;
+            tmp -> place = i + 1;
             tmp -> next = malloc( sizeof( seat ));
             if (tmp -> next == NULL)        Error_("error in function : malloc", 1);
+            last_seat = tmp;
             tmp = tmp -> next;
 
-        }
+        }   last_seat -> next = NULL;   free(tmp);
 
-        free(tmp);
+        line_counter ++;
+
+        redo:
+
+        memset( line, 0, strlen(line) );
 
     }
 
-
     /*  in this code block further seat structs are allocated and filled, 
-        to represent the input ( seats reserving request)from client side. */
+        to represent the input ( seats reserving request) from client side. */
 
     char buffer[MAX_LINE];
 
     ret = Readline( descr, buffer, MAX_LINE );
     if (ret == -1)      Error_("error in function : Readline.", 1);
+    memset( line, 0, sizeof(line) );
 
-    memset( line, 0, strlen(line) );
+    printf("\n Buffer content : %s", buffer);       fflush(stdout);
 
     reservation_seats = malloc(sizeof(seat));
+    if (reservation_seats == NULL) Error_(" Error in function : malloc. (reserve and confirm)", 1);
 
     tmp = reservation_seats;
 
-    tmp -> line = atoi(strtok( buffer, ":"));
-    tmp -> place = atoi(strtok( NULL, " "));
-    tmp -> is_reserved = '1';
+    token = strtok( buffer, ":" );
+    tmp -> line = atoi( token );
+    memset( token, 0, strlen(token));
+
+    token = strtok( NULL, " ");
+    tmp -> place = atoi( token );
+    memset( token, 0, strlen(token));
+
+    tmp -> is_reserved = 'X';
     tmp -> next = malloc( sizeof(seat));
     if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
+    last = tmp;
     tmp = tmp -> next;
 
-    while ( ( token = strtok( NULL, ":") ) != NULL) {
+    while ( ( token = strtok( NULL, "\n:") ) != NULL ) {
 
         tmp -> line = atoi(token);
-        tmp -> place = atoi(strtok( NULL, " "));
-        tmp -> is_reserved = '1';
+        memset( token, 0, strlen(token));
+
+        token = strtok( NULL, " ");
+        tmp -> place = atoi( token );
+        memset( token, 0, strlen(token));
+
+        tmp -> is_reserved = 'X';
         tmp -> next = malloc( sizeof(seat));
+        last = tmp;
         tmp = tmp -> next;
 
-    }
-
-    free(tmp);
-
+    }   
+    
+    if (last != NULL) {
+        last -> next = NULL;      
+        free(tmp);
+    } 
 
     //here's implemented the confirm / negation to client on his seats-reserving request.
 
     char confirm;
 
-    while ( reservation_seats -> next != NULL ) {
+    seat *first = reservation_seats;
 
-        tmp = reservation_seats;
+    do {
 
-        int     _line = tmp -> line;
-        int     _place = tmp -> place;
+        int     _line = reservation_seats -> line;
+        int     _place = reservation_seats -> place;
 
         tmp = seats_vector + (_line - 1);
-        for (int i = 0; i < _place; i ++) {
+
+        for (int i = 0; i < _place -1; i ++) {
             tmp = tmp -> next;
         }
 
@@ -351,16 +372,117 @@ void reserve_and_confirm(){
             break;
         }
 
-    }
+        if( reservation_seats -> next == NULL)      break;
+
+    } while ( ( reservation_seats = reservation_seats -> next ) != NULL ); 
+
+
+    reservation_seats = first;
 
     if (confirm == '1') {
+
         //override file with new values, then send back a reservation confirm.
 
+        do {
+
+            int     _line = reservation_seats -> line;
+            int     _place = reservation_seats -> place;
+
+            tmp = seats_vector + (_line - 1);
+            for (int i = 0; i < _place -1 ; i ++) {
+                tmp = tmp -> next;
+            }
+
+            if ( tmp -> is_reserved == '0')     tmp -> is_reserved = 'X';
+
+            if( reservation_seats -> next == NULL)      break;
+
+        } while ( ( reservation_seats = reservation_seats -> next ) != NULL );
+
+
+        //write updates on file 'cinema'
+
+        memset( buffer, 0, sizeof(buffer) );
+
+        for( int i = 0; i < 9; i ++ ) { 
+            
+            //override file contents with updated ones.
+
+            tmp = seats_vector + i;
+
+            sprintf( buffer + strlen(buffer), "FILA%d           ",  tmp -> line );
+
+            for(int j = 0; j < 14; j ++) {
+
+                if( j == 13 )   sprintf( buffer + strlen(buffer), "%c\n\n\n", tmp -> is_reserved );
+                else            sprintf( buffer + strlen(buffer), "%c     ",  tmp -> is_reserved );
+
+                tmp = tmp -> next;
+
+            } 
+
+        }
+
+        fseek( f, 0, SEEK_SET);
+        ret = fputs( buffer, f );
+        if (ret == -1)      Error_("Error in function : fputs (reserve and confirm)", 1);
+
+        fflush( f );              fclose( f );
+
+
+
+        //complete reservation procedure by sending the client his own reservation code.
+
+        int fd = open( "cinema_prenotazioni", O_RDWR, 0660 );
+        if (fd == -1)       Error_("Error in function : open (reserve and confirm)", 1);
+
+        int reservation_code = (int) lseek(fd, 0, SEEK_END);
+
+        tmp = first;
+
+        memset( buffer, 0, sizeof(buffer) );
+
+        sprintf( buffer, "%d/", reservation_code);
+
+        do {
+
+            sprintf( buffer + strlen(buffer), "%d:%d ", tmp -> line, tmp -> place );
+
+        } while( ( tmp = tmp -> next ) != NULL );
+
+        sprintf( buffer + strlen(buffer), "\n" );
+
+
+        write( fd, buffer, strlen(buffer) );
+        if (ret == -1)      Error_("Error in function : write (reserve and confirm", 1);
+
+        printf("TRANSACTION COMPLETE. Reservation infos : %s", buffer );fflush(stdout);
+
+        pthread_mutex_unlock( &CINEMA_MUTEX );
+
+
+        memset( buffer, 0, sizeof(buffer) );
+        sprintf( buffer, "%d", reservation_code );
+        
+        ret = Writeline( descr, buffer, strlen(buffer) + 1 );
+        if (ret == -1)      Error_("Error in function : Writeline (reserve and confirm).", 1);
+
+
+
+
     } else{
+
         //send back a reservation negation.
+
+        memset( buffer, 0, strlen(buffer) );
+        sprintf( buffer, "ABORT" );
+        
+        ret = Writeline( descr, buffer, strlen(buffer) + 1 );
+        if (ret == -1)      Error_("Error in function : Writeline (reserve and confirm).", 1);
+
+        printf("\n TRANSACTION ABORTED. Error in retriving seats for the show."); fflush(stdout);
+
     }
-
-
 
 
 }

@@ -1,4 +1,5 @@
-#include "support.h"
+#pragma once
+#include "header.h"
 #include <sys/socket.h>
 #include <unistd.h>
 #include <errno.h>
@@ -55,7 +56,6 @@ ssize_t Writeline( int socket_descriptor , const void *vptr, size_t n ) {
     while ( nleft > 0 ) {       //make sure of writing all characters on socket.
 
 		if ( ( nwritten = write( socket_descriptor, buffer, nleft ) ) <= 0 ) {
-	    	
             if ( errno == EINTR ) nwritten = 0;
 		    else return -1;
 
@@ -97,7 +97,7 @@ int quit(){
 
 	int ret;	char quit[6];
 	
-    printf("\n\n\n\npress a button to proceed...\n");
+    printf("\nPress a button to proceed...");
 
     ret = scanf("%s", quit);
 
@@ -125,7 +125,7 @@ int Writefile( int socket_descriptor, FILE * stream ) {
 
 	while ( getline( &l, &len, stream) != -1 ) {
 
-		size += Writeline( socket_descriptor, l, strlen(l));
+		size += Writeline( socket_descriptor, l, strlen(l) );
 		if (size == -1)		return -1;
 
 	} 

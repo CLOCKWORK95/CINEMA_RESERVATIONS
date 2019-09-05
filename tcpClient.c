@@ -1,17 +1,5 @@
-#include <sys/socket.h>       /*  socket definitions        */
-#include <sys/types.h>        /*  socket types              */
-#include <arpa/inet.h>        /*  inet (3) funtions         */
-#include <unistd.h>           /*  misc. UNIX functions      */
-#include <netinet/in.h>
-#include <netdb.h>
-#include "support.h" 
-#include "support.c"     
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-
-    // printf("\e[1;34m This is a blue text.\e[0m \n\n");
-    // printf("\e[0;31m goodmorning vietnam!\e[0m \n");
+#include "header.h"
+#include "support.c"
 
 
 struct sockaddr_in      server_address;
@@ -29,7 +17,7 @@ int main (int argc, char** argv) {
     
     int ret;
 
-gui:
+    gui:
 
     display();
 
@@ -38,7 +26,7 @@ gui:
     printf("\n\n     Insert operation code here : ");
     ret = scanf( "%d", &operation);
     if (ret == -1)      Error_("error in function: scanf.", 1);
-    while( getchar() != '\n');
+    while( getchar() != '\n' );
 
     switch( operation) {
 
@@ -123,7 +111,7 @@ void try_connection() {
 
 
 
-int request_1(){
+int request_1() {
 
 
     char buff[MAX_LINE];        int ret,        bytes = 0;
@@ -149,34 +137,6 @@ int request_1(){
     memset( buff, 0, strlen(buff) );
 
 
-
-    //ACK / NACK the server on received file-lines number.
-    if ( bytes != 0) {
-
-        sprintf( buff, "ACK\n");
-
-        ret = Writeline( socket_descriptor, buff, strlen(buff));
-        if (ret == -1)      Error_("error in function : Writeline.", 1);
-
-        memset( buff, 0, strlen(buff) );
-
-    }   else {
-
-        sprintf( buff, "NACK\n");
-
-        ret = Writeline( socket_descriptor, buff, strlen(buff));
-        if (ret == -1)      Error_("error in function : Writeline.", 1);
-
-        memset( buff, 0, strlen(buff) );
-
-        printf("\nnothing to read...  ");
-
-        goto end;
-
-    }
-    
-
-
     //read all file and print it on terminal.
 
     printf("\e[1;1H\e[2J"); 
@@ -191,7 +151,7 @@ int request_1(){
 
     while ( counter != bytes ) {
 
-        counter += read( socket_descriptor,  buff, MAX_LINE );
+        counter += Readline( socket_descriptor,  buff, MAX_LINE );
         if (counter == -1)      Error_("error in function: read.", 1);
 
         printf( "%s", buff);
@@ -202,9 +162,8 @@ int request_1(){
 
     }
 
- end:
-
-    quit();
+    printf("\n Please, press a button to procede..."); fflush(stdout);
+    while(getchar() != '\n'){}
 
     return 0;
 
@@ -214,4 +173,66 @@ int request_1(){
 
 
 
-int request_2(){}
+int request_2() {
+
+    int ret, numSeats, LINE, PLACE;        char buff[MAX_LINE];
+
+
+
+    //set the request-code and send it to server.
+    sprintf( buff, "2\n" );
+
+    ret =  Writeline( socket_descriptor,  buff, strlen(buff));
+    if (ret == -1)      Error_("error in function: Writeline.", 1);
+
+    memset( buff, 0, strlen(buff) );
+
+
+
+    printf("\n How many seats do you want to reserve?\n N : ");
+
+    ret = scanf("%d", &numSeats);
+    if (ret == -1)      Error_("Error in function : scanf (request_2).", 1);
+    while( getchar() != '\n') {}
+
+    printf(" Please provide seats positions :");
+
+    for (int i = 0; i < numSeats; i ++) {
+
+        printf("\n SEAT RESERVE N°%d :\n LINE ", i );
+        ret = scanf( "%d", &LINE );
+        if (ret == -1)      Error_("Error in function : scanf (request_2).", 1);
+        while( getchar() != '\n') {}
+
+        printf("\n PLACE ");
+        ret = scanf( "%d", &PLACE );
+        if (ret == -1)      Error_("Error in function : scanf (request_2).", 1);
+        while( getchar() != '\n') {}
+
+        sprintf( buff + strlen(buff), "%d:%d ", LINE, PLACE );
+
+    }   sprintf(buff + strlen(buff), "\n");
+
+    ret = Writeline( socket_descriptor, buff, strlen(buff));
+    if (ret == -1)      Error_("Error in function : Writeline (request 2)", 1);
+
+    memset( buff, 0, sizeof(buff) );
+
+    ret = Readline( socket_descriptor, buff, MAX_LINE );
+    if (ret == -1)      Error_("Error in function : Readline (request 2)", 1);
+
+    if ( strcmp( buff, "ABORT") == 0 ) {
+        printf("\n\n ABORT TRANSACTION : Unable to reserve these places for today's show.");
+        fflush(stdout);
+        while(getchar() != '\n'){}
+    }
+
+    else{
+        printf(" TRANSACTION COMPLETE : Your reservation code is %s", buff );
+        fflush(stdout);
+        while(getchar() != '\n'){}
+    }
+
+    return 0;
+
+}
