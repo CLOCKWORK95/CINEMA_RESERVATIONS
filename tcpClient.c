@@ -32,7 +32,10 @@ int main (int argc, char** argv) {
 
         case 0 :    
                     if ( strcmp( "connected.", status) == 0 ) {
-                        printf("\n You're already connected to server!");
+                        close( socket_descriptor );
+                        memset( status, 0, strlen(status) );
+                        sprintf( status, "not connected.");
+                        printf("\n CONNECTION CLOSED."); fflush(stdout);
                         sleep(1);
                         goto gui; }
 
@@ -225,14 +228,14 @@ int request_2() {
         printf("\n\n ABORT TRANSACTION : Unable to reserve these places for today's show.");
         fflush(stdout);
         while(getchar() != '\n'){}
+        return 0;
     }
 
     else{
         printf(" TRANSACTION COMPLETE : Your reservation code is %s", buff );
         fflush(stdout);
         while(getchar() != '\n'){}
+        return 0;
     }
-
-    return 0;
 
 }

@@ -14,9 +14,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#define MAX_LINE 1000
+#define MAX_LINE        1000
 
-#define PORT 25000
+#define PORT            25000
+
+#define MAX_PENDING     5
 
 #define REQUESTCODE1    1
 

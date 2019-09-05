@@ -2,14 +2,10 @@
 #include "support.c"
 
 
-#define MAX_PENDING 5
-
-
 int                     socket_descriptor,       num_conns = 0;
 
 //mutex for synchronized threads' access on files 'cinema' and 'cinema_prenotazioni'.
 pthread_mutex_t         CINEMA_MUTEX = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t         CINEMA_RESERVATIONS_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
 struct sockaddr_in      my_address,     their_address;
                                                         
@@ -473,6 +469,7 @@ void reserve_and_confirm() {
     } else{
 
         //send back a reservation negation.
+        pthread_mutex_unlock( &CINEMA_MUTEX );
 
         memset( buffer, 0, strlen(buffer) );
         sprintf( buffer, "ABORT" );
