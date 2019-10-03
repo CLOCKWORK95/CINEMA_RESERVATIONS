@@ -23,9 +23,7 @@ typedef struct concurrent_connection_ {
 
 __thread int    descr,       my_conn_num,       file_descriptor;    
 
-__thread seat   *seats_vector,      *reservation_seats;
-
-
+__thread seat   *seats_vector,                  *reservation_seats;
 
 
 
@@ -34,6 +32,15 @@ void * connection_handler ( void * attr);
 void send_seats_view();
 
 void reserve_and_confirm();
+
+void delete_reservation();
+
+void build_cinema();
+
+void build_reservation_seats();
+
+int get_cancellation_seats();
+
 
 
 
@@ -141,6 +148,10 @@ void * connection_handler (void * attr) {
                 case 2:
                         reserve_and_confirm();
                         break;
+
+                case 3:
+                        delete_reservation();
+                        break;
                 
                 default:
                         printf("\ndefault!\n");
@@ -223,7 +234,7 @@ void reserve_and_confirm() {
     seats_vector = malloc( sizeof(seat) * 9);
     if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
 
-    char    *l = NULL,      delimiter[10],       *line,        *token;
+    char    *l = NULL,      *token;
 
     int     ret,            line_counter = 1;   size_t len;
 
@@ -231,118 +242,23 @@ void reserve_and_confirm() {
 
     FILE    *f;
 
-    line = malloc( sizeof(char) * 16);
-    if (line == NULL)   Error_("Error in function : malloc (reserve and confirm)", 1);
-
-
-    //ensure atomic transaction.
+    //ensure the atomicity of transaction.
     pthread_mutex_lock( &CINEMA_MUTEX ); 
 
     f = fopen( "cinema" , "r+" );
     if (f == NULL)      Error_("error in function: fopen (send seats view).", 1);
 
+    build_cinema( f );
 
-    /*  by this cycle, parse the 'cinema' file to build linked list structs (seat) 
-        containing all current informations of cinema hall. */
-
-    while( getline(&l, &len, f) != -1 &&  line_counter < 10 ) {
-
-        memset( line, 0, strlen(line) );
-
-        if ( strcmp( l, "\n") == 0 )    goto redo;
-
-        //dinamically set delimiter string's value.
-        ret = sprintf( delimiter, "FILA%d  ", line_counter);
-        if (ret == -1)      Error_("error in function : sprintf", 1);
-
-
-        //build a 'line string' containing current reservation values for each place of this (line_counter) line.
-        token = strtok( l, delimiter );
-        strcat( line, token );
-        memset( token, 0, strlen(token));
-        while ( ( token = strtok(NULL, " ") ) != NULL ) {
-            strcat( line, token );
-            memset( token, 0, strlen(token));
-        }
-
-        printf("\nline: %s", line);fflush(stdout);
-
-
-        //set all seats_vector[line_counter] infos.
-        tmp = seats_vector + ( line_counter - 1 );
-
-        seat    *last_seat = NULL;
-
-        for (int i = 0; i < strlen(line); i ++) {
-
-            tmp -> is_reserved = line[i];
-            tmp -> line = line_counter;
-            tmp -> place = i + 1;
-            tmp -> next = malloc( sizeof( seat ));
-            if (tmp -> next == NULL)        Error_("error in function : malloc", 1);
-            last_seat = tmp;
-            tmp = tmp -> next;
-
-        }   last_seat -> next = NULL;   free(tmp);
-
-        line_counter ++;
-
-        redo:
-
-        memset( line, 0, strlen(line) );
-
-    }
-
-    /*  in this code block further seat structs are allocated and filled, 
-        to represent the input ( seats reserving request) from client side. */
-
+    //allocate seat_structures to represent the input of this reservation occurrance.
     char buffer[MAX_LINE];
 
     ret = Readline( descr, buffer, MAX_LINE );
     if (ret == -1)      Error_("error in function : Readline.", 1);
-    memset( line, 0, sizeof(line) );
 
     printf("\n Buffer content : %s", buffer);       fflush(stdout);
 
-    reservation_seats = malloc(sizeof(seat));
-    if (reservation_seats == NULL) Error_(" Error in function : malloc. (reserve and confirm)", 1);
-
-    tmp = reservation_seats;
-
-    token = strtok( buffer, ":" );
-    tmp -> line = atoi( token );
-    memset( token, 0, strlen(token));
-
-    token = strtok( NULL, " ");
-    tmp -> place = atoi( token );
-    memset( token, 0, strlen(token));
-
-    tmp -> is_reserved = 'X';
-    tmp -> next = malloc( sizeof(seat));
-    if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
-    last = tmp;
-    tmp = tmp -> next;
-
-    while ( ( token = strtok( NULL, "\n:") ) != NULL ) {
-
-        tmp -> line = atoi(token);
-        memset( token, 0, strlen(token));
-
-        token = strtok( NULL, " ");
-        tmp -> place = atoi( token );
-        memset( token, 0, strlen(token));
-
-        tmp -> is_reserved = 'X';
-        tmp -> next = malloc( sizeof(seat));
-        last = tmp;
-        tmp = tmp -> next;
-
-    }   
-    
-    if (last != NULL) {
-        last -> next = NULL;      
-        free(tmp);
-    } 
+    build_reservation_seats( buffer );
 
     //here's implemented the confirm / negation to client on his seats-reserving request.
 
@@ -454,6 +370,9 @@ void reserve_and_confirm() {
 
         printf("TRANSACTION COMPLETE. Reservation infos : %s", buffer );fflush(stdout);
 
+        close(fd);
+
+        //release mutex.
         pthread_mutex_unlock( &CINEMA_MUTEX );
 
 
@@ -467,13 +386,13 @@ void reserve_and_confirm() {
 
 
     } else{
-
-        //send back a reservation negation.
+        //release mutex.
         pthread_mutex_unlock( &CINEMA_MUTEX );
 
         memset( buffer, 0, strlen(buffer) );
         sprintf( buffer, "ABORT" );
         
+        //send back a reservation negation.
         ret = Writeline( descr, buffer, strlen(buffer) + 1 );
         if (ret == -1)      Error_("Error in function : Writeline (reserve and confirm).", 1);
 
@@ -481,5 +400,303 @@ void reserve_and_confirm() {
 
     }
 
+    free(seats_vector);
+    free(reservation_seats);
+    
+
+}
+
+
+
+
+void delete_reservation() {
+
+    //validate memory TLS to represent all seats' informations in cinema hall.
+    seats_vector = malloc( sizeof(seat) * 9);
+    if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
+
+    char    *l = NULL,      *token;
+
+    int     ret; 
+    
+    size_t len;
+
+    seat    *tmp = NULL,       *last = NULL;
+
+    FILE    *f;
+
+    //ensure atomicity of transaction.
+    pthread_mutex_lock( &CINEMA_MUTEX ); 
+
+    f = fopen( "cinema" , "r+" );
+    if (f == NULL)      Error_("error in function: fopen (send seats view).", 1);
+
+    build_cinema( f );
+
+    //get the reservation code from the client.
+    char reservation_code[MAX_LINE];
+
+    ret = Readline( descr, reservation_code, MAX_LINE );
+    if (ret == -1)      Error_("error in function : Readline.", 1);
+
+    printf("\n Buffer content : %s", reservation_code);       fflush(stdout);
+
+    //find the code within reservation file and procede with cancellation.
+    FILE *codes = fopen( "cinema_prenotazioni", "r+" );
+
+    int bytes = 0;
+    int codelen = 0;
+    sleep(1);
+    
+    ret = get_cancellation_seats( codes, reservation_code, &bytes, &codelen );
+
+    if( ret != 0 )   goto end2;
+
+    fseek( codes, (bytes - codelen), SEEK_SET);
+
+    fputs( "NV", codes );
+
+        //override 'cinema' file with updated reservation values.
+    do {
+        int     _line = reservation_seats -> line;
+        int     _place = reservation_seats -> place;
+
+        tmp = seats_vector + (_line - 1);
+        for (int i = 0; i < _place -1 ; i ++) {
+            tmp = tmp -> next;
+        }
+
+        if ( tmp -> is_reserved == 'X')     tmp -> is_reserved = '0';
+
+        if( reservation_seats -> next == NULL)      break;
+
+    } while ( ( reservation_seats = reservation_seats -> next ) != NULL );
+
+    char buffer[MAX_LINE];
+
+    memset(buffer, 0, sizeof(buffer));
+
+    for( int i = 0; i < 9; i ++ ) { 
+
+        tmp = seats_vector + i;
+
+        sprintf( buffer + strlen(buffer), "FILA%d           ",  tmp -> line );
+
+        for(int j = 0; j < 14; j ++) {
+
+            if( j == 13 )   sprintf( buffer + strlen(buffer), "%c\n\n\n", tmp -> is_reserved );
+            else            sprintf( buffer + strlen(buffer), "%c     ",  tmp -> is_reserved );
+
+            tmp = tmp -> next;
+
+        } 
+    }
+    fseek( f, 0, SEEK_SET);
+    ret = fputs( buffer, f );
+    if (ret == -1)      Error_("Error in function : fputs (reserve and confirm)", 1);
+
+    fflush( f );              fclose( f );
+
+    //release the mutex.
+    pthread_mutex_unlock( &CINEMA_MUTEX );
+    fclose( codes );
+    free( reservation_seats );
+    free( seats_vector );
+    printf("\n TRANSACTION COMPLETE. Reservation has been successfully deleted."); fflush(stdout);
+    return;
+
+    end2:
+    pthread_mutex_unlock( &CINEMA_MUTEX );
+    fclose( codes );
+    free( reservation_seats );
+    free( seats_vector );
+    printf("\n Reservation not found."); fflush(stdout);
+    return;
+
+}
+
+
+
+
+void build_cinema( FILE *f ) {
+
+    //validate 'seats_vector' TLS to represent all seats' informations in cinema hall.
+
+    seats_vector = malloc( sizeof(seat) * 9);
+    if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
+
+    char    *l = NULL,      delimiter[10],       *line,        *token;
+
+    int     line_counter = 1;                   
+    
+    size_t len;
+
+    seat    *tmp = NULL,       *last = NULL;
+
+    line = malloc( sizeof(char) * 16 );
+    if (line == NULL)       Error_("Error in function : malloc. (build_cinema).", 1);
+
+    /*  by this cycle, parse the 'cinema' file to build linked list structs (seat) 
+        containing all current informations of cinema hall. */
+
+    while( getline(&l, &len, f) != -1 &&  line_counter < 10 ) {
+
+        memset( line, 0, strlen(line) );
+
+        if ( strcmp( l, "\n") == 0 )    goto redo;
+
+        //dinamically set delimiter string's value.
+        sprintf( delimiter, "FILA%d  ", line_counter);
+
+        //build a 'line string' containing current reservation values for each place of this (line_counter) line.
+        token = strtok( l, delimiter );
+        strcat( line, token );
+        memset( token, 0, strlen(token));
+        while ( ( token = strtok(NULL, " ") ) != NULL ) {
+            strcat( line, token );
+            memset( token, 0, strlen(token));
+        }
+
+        printf("\nline: %s", line);fflush(stdout);
+
+        //set all seats_vector[line_counter] infos.
+        tmp = seats_vector + ( line_counter - 1 );
+
+        seat    *last_seat = NULL;
+
+        for (int i = 0; i < strlen(line); i ++) {
+
+            tmp -> is_reserved = line[i];
+            tmp -> line = line_counter;
+            tmp -> place = i + 1;
+            tmp -> next = malloc( sizeof( seat ));
+            if (tmp -> next == NULL)        Error_("error in function : malloc", 1);
+            last_seat = tmp;
+            tmp = tmp -> next;
+
+        }   last_seat -> next = NULL;   free(tmp);
+
+        line_counter ++;
+
+        redo:
+
+        memset( line, 0, strlen(line) );
+
+    }   free(line);
+
+}
+
+
+void build_reservation_seats( char * buffer) {
+
+    char * token = NULL;
+
+    seat *tmp,      *last;
+
+    reservation_seats = malloc(sizeof(seat));
+    if (reservation_seats == NULL) Error_(" Error in function : malloc. (reserve and confirm)", 1);
+
+    tmp = reservation_seats;
+
+    token = strtok( buffer, ":" );
+    tmp -> line = atoi( token );
+    memset( token, 0, strlen(token));
+
+    token = strtok( NULL, " ");
+    tmp -> place = atoi( token );
+    memset( token, 0, strlen(token));
+
+    tmp -> next = malloc( sizeof(seat));
+    if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
+    last = tmp;
+    tmp = tmp -> next;
+
+    while ( ( token = strtok( NULL, "\n:") ) != NULL ) {
+
+        tmp -> line = atoi(token);
+        memset( token, 0, strlen(token));
+
+        token = strtok( NULL, " ");
+        tmp -> place = atoi( token );
+        memset( token, 0, strlen(token));
+
+        tmp -> next = malloc( sizeof(seat));
+        last = tmp;
+        tmp = tmp -> next;
+
+    }   
+    
+    if (last != NULL) {
+        last -> next = NULL;      
+        free(tmp);
+    } 
+
+}
+
+
+int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, int *codelen ) {
+
+    char    *l,     *token = NULL;   
+
+    size_t          len;
+
+    seat    *tmp,   *last;
+
+
+    while ( getline( &l, &len, codes ) != -1 ) {
+
+        *bytes += strlen(l);
+        *codelen = strlen(l);
+
+        token = strtok( l, "/");
+
+        if( strcmp( token, reservation_code ) == 0 ) {
+
+
+            reservation_seats = malloc(sizeof(seat));
+            if (reservation_seats == NULL) Error_(" Error in function : malloc. (get_cancellation_seats)", 1);
+
+            tmp = reservation_seats;
+
+            token = strtok( NULL, ":" );
+            tmp -> line = atoi( token );
+            memset( token, 0, strlen(token));
+
+            token = strtok( NULL, "\n ");
+            tmp -> place = atoi( token );
+            memset( token, 0, strlen(token));
+
+            tmp -> next = malloc( sizeof(seat));
+            if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
+            last = tmp;
+            tmp = tmp -> next;
+
+            while ( ( token = strtok( NULL, ":\n") ) != NULL ) {
+
+                tmp -> line = atoi(token);
+                memset( token, 0, strlen(token));
+                
+                token = strtok( NULL, " \n");
+                tmp -> place = atoi( token );  
+                memset( token, 0, strlen(token));
+
+                tmp -> next = malloc( sizeof(seat));
+                if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
+                last = tmp;
+                tmp = tmp -> next;
+
+            }   
+            
+            if (last != NULL) {
+                last -> next = NULL;      
+                free(tmp);
+            } 
+            return 0;
+            
+        }
+    
+    }
+
+    return 1;
 
 }

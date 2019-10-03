@@ -51,6 +51,10 @@ int main (int argc, char** argv) {
                     request_2();
                     goto gui;
 
+        case 3:     
+                    request_3();
+                    goto gui;
+
         default:    goto gui;
 
     }
@@ -80,6 +84,7 @@ void display() {
     printf("|   OP   0 : Connect to CINEMA RESERVATIONS SERVER.                                 |\n");
     printf("|   OP   1 : View the current state of today's seats reservation.                   |\n");
     printf("|   OP   2 : Reserve some seats for today's show.                                   |\n");
+	printf("|   OP   3 : Delete a reservation.                                                  |\n");
 	printf("|____ ________ ________ ________ ________ ________ ________ ________ ________ ______|\n\n");
 
     fflush(stdout);
@@ -237,5 +242,33 @@ int request_2() {
         while(getchar() != '\n'){}
         return 0;
     }
+
+}
+
+
+
+
+int request_3() {
+
+    char buff[MAX_LINE];        int ret,        bytes = 0;
+
+    //set the request-code and send it to server.
+    sprintf( buff, "3\n" );
+
+    ret =  Writeline( socket_descriptor,  buff, strlen(buff) );
+    if (ret == -1)      Error_("error in function: Writeline.", 1);
+
+    memset( buff, 0, strlen(buff) );
+
+    //insert reservation code for cancellation.
+    printf("\n Please, insert your reservation code here : "); fflush(stdout);
+    ret = scanf("%s", buff);
+    if (ret == -1)      Error_("Error in function : scanf (request 3).", 1);
+    while( getchar()!= '\n') {}
+
+    ret =  Writeline( socket_descriptor,  buff, strlen(buff) + 1 );
+    if (ret == -1)      Error_("error in function: Writeline.", 1);
+
+
 
 }

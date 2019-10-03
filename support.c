@@ -92,28 +92,6 @@ int Lines_counter( FILE * f ) {
 
 
 
-
-int quit(){
-
-	int ret;	char quit[6];
-	
-    printf("\nPress a button to proceed...");
-
-    ret = scanf("%s", quit);
-
-	if (ret == -1)	{
-		printf("error in function: scanf.");
-		return -1;
-	}
-
-    while( getchar() != '\n') {}
-
-	return 0;
-
-}
-
-
-
 int Writefile( int socket_descriptor, FILE * stream ) {
 
 	int 	size = 0;

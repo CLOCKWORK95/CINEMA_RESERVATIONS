@@ -42,7 +42,11 @@ int request_1();
 
 int request_2();
 
+int request_3();
+
 int quit();
 
 int Writefile( int socket_descriptor, FILE *f);
+
+
 
