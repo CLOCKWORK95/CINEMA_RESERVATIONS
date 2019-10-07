@@ -1,11 +1,15 @@
 #include "header.h"
 #include "support.c"
+#include <signal.h>
 
 
 int                     socket_descriptor,       num_conns = 0;
 
 //mutex for synchronized threads' access on files 'cinema' and 'cinema_prenotazioni'.
 pthread_mutex_t         CINEMA_MUTEX = PTHREAD_MUTEX_INITIALIZER;
+
+//mutex for exit synchronization.
+pthread_mutex_t         EXIT_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
 struct sockaddr_in      my_address,     their_address;
                                                         
@@ -17,13 +21,29 @@ typedef struct concurrent_connection_ {
     int                                     connection_number;
     pthread_t                               tid;
     struct concurrent_connection_           *next;
+    struct concurrent_connection_           *before;
 
 } concurrent_connection ;                                   concurrent_connection   *new_conn;           concurrent_connection   *tmp;
 
 
+
+//index used by the secure_exit signal handler to identify the exiting thread.
+int exit_index = 0;
+
+
+//Thread Local Storage.
 __thread int    descr,       my_conn_num,       file_descriptor;    
 
 __thread seat   *seats_vector,                  *reservation_seats;
+
+__thread concurrent_connection                  *my_conn;
+
+
+
+//secure-exit semaphore for main thread.
+int sem_id;
+
+
 
 
 
@@ -44,20 +64,110 @@ int get_cancellation_seats();
 
 
 
+void sigHandler( int signo ){
+
+    //temporarily block SIGINT occurrences.
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigprocmask(SIG_BLOCK, &set, 0);
+
+    int ret;            struct sembuf oper;
+
+    oper.sem_num = 0;
+    oper.sem_flg = 0;
+    oper.sem_op = -num_conns;
+
+
+    pthread_kill( ( new_conn -> tid ), SIGUSR1 );
+
+    ret = semop( sem_id, &oper, 1 );
+    if (ret == -1)      Error_("Error in function : semop.", 1);
+
+
+    printf("\n\n All threads has completed their tasks and exited. Server exits.\n\n");
+    fflush(stdout);
+
+    exit( EXIT_SUCCESS ); 
+
+}
+
+
+
+void secureExit( int signo ) {
+
+    sigset_t set;
+    sigemptyset( &set );
+    sigaddset( &set, SIGUSR1 );
+    sigprocmask( SIG_BLOCK, &set, 0);
+
+    struct sembuf oper;         int ret;
+
+
+    //critical section for exit_index_increment.
+    pthread_mutex_lock( &EXIT_MUTEX );
+
+    exit_index ++; 
+
+    pthread_mutex_unlock( &EXIT_MUTEX );
+
+    if( exit_index < num_conns )        new_conn = new_conn -> next;   
+
+    oper.sem_num = 0;
+    oper.sem_flg = 0;
+    oper.sem_op  = 1;
+    
+    again:
+    ret = semop( sem_id, &oper, 1);
+    if (ret == -1 && errno == EINTR ) {
+        goto again;
+    }
+
+    sigprocmask( SIG_UNBLOCK, &set, 0 );
+
+    if( exit_index < num_conns )        pthread_kill( new_conn -> tid, SIGUSR1 );
+
+
+}
+
+
+
 
 int main (int argc, char** argv){
 
     int ret,    addrlen;
 
+    signal( SIGINT, sigHandler );
+
+    //initiate semaphore structure for secure exit of Server.
+    sem_id = semget( IPC_PRIVATE, 1, 0660);
+    if (sem_id == -1) Error_("Error in function : semget.", 1);
+
+    ret = semctl( sem_id, 0, SETVAL, 0);
+    if (ret == -1)      Error_("Error in function : semctl.", 1);
+
     //open a session on a socket.
     socket_descriptor = socket( AF_INET, SOCK_STREAM, 0);
     if (socket_descriptor == -1)        Error_("error in function: socket.", 1);
+
 
     //initiate the address of this server-socket, and then bind it to the opened session.
     memset( &my_address, 0, sizeof( my_address));
     my_address.sin_family = AF_INET;
     my_address.sin_port = htons(PORT);
     my_address.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    int opt = 1;
+
+    if ( setsockopt( socket_descriptor, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt) ) < 0 ) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    
+    if( setsockopt( socket_descriptor, SOL_SOCKET, SO_REUSEPORT, (char *)&opt, sizeof(opt) ) < 0 ) {
+           perror("setsockopt");
+           exit(EXIT_FAILURE);
+    }
 
     ret = bind( socket_descriptor, (struct sockaddr *) &my_address, sizeof(my_address) );
     if (ret != 0)      Error_("error in function: bind.", 1);
@@ -71,31 +181,42 @@ int main (int argc, char** argv){
     printf("        *** CINEMA RESERVATIONS SERVER ***   ");
     printf("\n\n    listening to connection requests...\n");
 
+
+    new_conn = malloc( sizeof( concurrent_connection ) );
+    if (new_conn == NULL)        Error_("error in function: malloc.", 1);
+
+    tmp = new_conn;
+
+
     //requests handler loop.
     while ( 1 ) {
 
-
+    redo:
         ret = accept( socket_descriptor, (struct sockaddr *) &their_address, &addrlen );
-        if (ret == -1)      Error_("error in function: accept.", 1);
+        if (ret == -1)  {
+            if ( errno == EINTR ) goto redo;
+            else return -1;
+        }
 
 
             {   //generate a new child thread to handle the new client-server connection (server side).
 
                 num_conns ++;
 
-                new_conn = malloc( sizeof( concurrent_connection ) );
-                if (new_conn == NULL)        Error_("error in function: malloc.", 1);
+                memset( tmp, 0, sizeof(concurrent_connection) );
+                tmp -> sock_descr = ret;
+                tmp -> connection_number = num_conns;
 
-                memset( new_conn, 0, sizeof(concurrent_connection) );
-                new_conn -> sock_descr = ret;
-                new_conn -> connection_number = num_conns;
-                
-                tmp = new_conn;
-                
+                tmp -> next = malloc( sizeof( concurrent_connection ) );
+                if (tmp -> next == NULL)        Error_("error in function: malloc.", 1);
+
                 ret = pthread_create( &( tmp -> tid ), NULL, connection_handler, (void *) tmp ); 
                 if (ret == -1)      Error_("error in function: pthread_create.", 1);
 
-                new_conn = new_conn -> next;
+                concurrent_connection *before = tmp;
+                tmp = tmp -> next;
+                tmp -> before = before;
+
 
             }
 
@@ -112,13 +233,26 @@ int main (int argc, char** argv){
 
 void * connection_handler (void * attr) {
 
-    int ret,    request_code;
+    int             ret,    request_code;
+
+    struct sembuf   oper;
+
+    // initiate a signal mask and block SIGINT.
+    sigset_t set;
+    sigemptyset( &set );
+    sigaddset( &set, SIGINT );
+    sigprocmask( SIG_BLOCK, &set, 0);
+
+    sigemptyset( &set );
+    sigaddset( &set, SIGUSR1);
+    signal( SIGUSR1, secureExit );
 
     char buffer[MAX_LINE];
 
     //set the TLS.
-    descr = (int) ( (concurrent_connection *) attr ) -> sock_descr;
-    my_conn_num = (int) ( (concurrent_connection *) attr ) -> connection_number;
+    my_conn = (concurrent_connection *) attr;
+    descr = (int)  my_conn -> sock_descr;
+    my_conn_num = (int) my_conn -> connection_number;
 
 
     //print connection infos on screen.
@@ -127,11 +261,22 @@ void * connection_handler (void * attr) {
     printf("\nConnection n° %d established : Ready to answer client requests...", my_conn_num );
     fflush(stdout);
 
- 
+    struct timeval timeout; 
+
+    //set socket timeout
+    timeout.tv_sec = (time_t) SOCKET_TIMEOUT;
+
+
+    if ( setsockopt (descr, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0 )
+        Error_("setsockopt failed\n", 1);
+
+
     do{
 
         ret = Readline( descr, buffer, MAX_LINE );
-        if (ret == -1)      Error_("error in function : Readline.", 1);
+        if (ret == -1) {
+            pthread_exit(NULL);
+        }
         
         if (ret != 0){
 
@@ -142,15 +287,126 @@ void * connection_handler (void * attr) {
             switch(request_code) {
 
                 case 1:
+                        sigprocmask(SIG_BLOCK, &set, 0);
+
                         send_seats_view();
+
+                        if ( sigpending( &set ) == 0 ) {
+
+                            if ( sigismember( &set, SIGUSR1 ) ) {
+
+                                printf("thread n° %ld exits\n", pthread_self() );
+                                fflush(stdout);
+
+                                oper.sem_num = 0;
+                                oper.sem_flg = 0;
+                                oper.sem_op  = 1;
+                                
+                                again_1:
+                                ret = semop( sem_id, &oper, 1);
+                                if (ret == -1 && errno == EINTR ) {
+                                    goto again_1;
+                                }
+
+                                pthread_mutex_lock( &EXIT_MUTEX );
+
+                                exit_index ++; 
+
+                                pthread_mutex_unlock( &EXIT_MUTEX );
+                            
+
+                                if ( exit_index < num_conns ) {
+                                    new_conn = new_conn -> next;  
+                                    pthread_kill( new_conn -> tid, SIGUSR1 ); 
+                                }
+                                
+                                pthread_exit( (void*) -1 );
+
+                            }
+                        }
+
                         break;
 
                 case 2:
+                        sigprocmask(SIG_BLOCK, &set, 0);
+
                         reserve_and_confirm();
+
+                        if ( sigpending( &set ) == 0 ) {
+
+                            if ( sigismember( &set, SIGUSR1 ) ) {
+
+                                printf("thread n° %ld exits\n", pthread_self() );
+                                fflush(stdout);
+
+                                oper.sem_num = 0;
+                                oper.sem_flg = 0;
+                                oper.sem_op  = 1;
+                                
+                                again_2:
+                                ret = semop( sem_id, &oper, 1);
+                                if (ret == -1 && errno == EINTR ) {
+                                    goto again_2;
+                                }
+
+                                pthread_mutex_lock( &EXIT_MUTEX );
+
+                                exit_index ++; 
+
+                                pthread_mutex_unlock( &EXIT_MUTEX );
+                            
+
+                                if ( exit_index < num_conns ) {
+                                    new_conn = new_conn -> next;  
+                                    pthread_kill( new_conn -> tid, SIGUSR1 ); 
+                                }
+                                
+                                pthread_exit( (void*) -1 );
+
+                            }
+                        }
+
                         break;
 
                 case 3:
+                        sigprocmask(SIG_BLOCK, &set, 0);
+
                         delete_reservation();
+
+                        if ( sigpending( &set ) == 0 ) {
+
+                            if ( sigismember( &set, SIGUSR1 ) ) {
+
+                                printf("thread n° %ld exits\n", pthread_self() );
+                                fflush(stdout);
+
+                                oper.sem_num = 0;
+                                oper.sem_flg = 0;
+                                oper.sem_op  = 1;
+                                
+                                again_3:
+                                ret = semop( sem_id, &oper, 1);
+                                if (ret == -1 && errno == EINTR ) {
+                                    goto again_3;
+                                }
+
+                                pthread_mutex_lock( &EXIT_MUTEX );
+
+                                exit_index ++; 
+
+                                pthread_mutex_unlock( &EXIT_MUTEX );
+                            
+
+                                if ( exit_index < num_conns ) {
+                                    new_conn = new_conn -> next;  
+                                    pthread_kill( new_conn -> tid, SIGUSR1 ); 
+                                }
+                                
+                                pthread_exit( (void*) -1 );
+
+                            }
+                        }
+
                         break;
                 
                 default:

@@ -8,8 +8,7 @@ int                     socket_descriptor;
 
 char                    status[16] = "not connected.";
 
-                          
-
+    
 
 
 

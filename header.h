@@ -1,8 +1,10 @@
 #pragma once
+#define _POSIX_C_SOURCE 199309L
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/socket.h>      
-#include <sys/types.h>        
+#include <sys/types.h>  
+#include <sys/stat.h>      
 #include <arpa/inet.h>           
 #include <netinet/in.h>
 #include <netdb.h>      
@@ -13,6 +15,11 @@
 #include <sys/sem.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <signal.h>
+
+
+#define SOCKET_TIMEOUT  10
 
 #define MAX_LINE        1000
 

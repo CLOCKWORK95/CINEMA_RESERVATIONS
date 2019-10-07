@@ -9,7 +9,7 @@
 
 
 
-//read a line from socket_descriptor channel, putting its content in vptr.
+//read a line from socket_descriptor channel, putting its content in *vptr.
 ssize_t Readline( int socket_descriptor, void *vptr, size_t maxlenght ) {
     
     ssize_t     n,      read_character;
@@ -19,27 +19,34 @@ ssize_t Readline( int socket_descriptor, void *vptr, size_t maxlenght ) {
 
     for ( n = 1; n < maxlenght; n++ ) {
 
-		read_character = read(socket_descriptor, &c, 1);
+		read_character = recv(socket_descriptor, &c, 1, MSG_NOSIGNAL );
 
 		if ( read_character == 1 ) {        //a character has been read.
 	    		*buffer++ = c;
 	    		if ( c == '\n' ) break;
 				if ( c == '\0' ) break;
 		}
-		else
+
+		else {
+
 			if ( read_character == 0 ) {    
 			    if ( n == 1 ) return 0;     //nothing to read.
 			    else break;
 			}
+
 			else {
-			    if ( errno == EINTR ) continue;
-			    return -1;
+			    if ( errno == EINTR ) {
+			    n = 0;
+				break;
+				}
 			}
+		}
+			
     }
 
     *buffer = 0;
 
-    return n;       //line lenght.
+    return n;       //line lenght (number of read characters).
 
 }
 
@@ -55,9 +62,18 @@ ssize_t Writeline( int socket_descriptor , const void *vptr, size_t n ) {
 
     while ( nleft > 0 ) {       //make sure of writing all characters on socket.
 
-		if ( ( nwritten = write( socket_descriptor, buffer, nleft ) ) <= 0 ) {
-            if ( errno == EINTR ) nwritten = 0;
-		    else return -1;
+		if ( ( nwritten = send( socket_descriptor, buffer, nleft, MSG_NOSIGNAL ) ) <= 0 ) {
+
+			if ( errno == EINTR ) 		nwritten = 0;
+
+			else {
+
+				close(socket_descriptor);
+				printf("\n Socket n° %d has been closed. Thread exits.", socket_descriptor);
+				fflush(stdout);
+				pthread_exit((void*)-1);
+
+			}
 
 		}
 
