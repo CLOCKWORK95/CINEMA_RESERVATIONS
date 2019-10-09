@@ -1,15 +1,16 @@
 #include "header.h"
 #include "support.c"
-#include <signal.h>
 
 
 int                     socket_descriptor,       num_conns = 0;
+
 
 //mutex for synchronized threads' access on files 'cinema' and 'cinema_prenotazioni'.
 pthread_mutex_t         CINEMA_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
 //mutex for exit synchronization.
 pthread_mutex_t         EXIT_MUTEX = PTHREAD_MUTEX_INITIALIZER;
+
 
 struct sockaddr_in      my_address,     their_address;
                                                         
@@ -58,6 +59,8 @@ void delete_reservation();
 void build_cinema();
 
 void build_reservation_seats();
+
+int load_reservation();
 
 int get_cancellation_seats();
 
@@ -109,9 +112,9 @@ void secureExit( int signo ) {
 
     exit_index ++; 
 
-    pthread_mutex_unlock( &EXIT_MUTEX );
+    if( exit_index < num_conns )        new_conn = new_conn -> next; 
 
-    if( exit_index < num_conns )        new_conn = new_conn -> next;   
+    pthread_mutex_unlock( &EXIT_MUTEX );  
 
     oper.sem_num = 0;
     oper.sem_flg = 0;
@@ -123,9 +126,10 @@ void secureExit( int signo ) {
         goto again;
     }
 
+    if( exit_index < num_conns )        pthread_kill( new_conn -> tid, SIGUSR1 );
+
     sigprocmask( SIG_UNBLOCK, &set, 0 );
 
-    if( exit_index < num_conns )        pthread_kill( new_conn -> tid, SIGUSR1 );
 
 
 }
@@ -264,7 +268,7 @@ void * connection_handler (void * attr) {
     struct timeval timeout; 
 
     //set socket timeout
-    timeout.tv_sec = (time_t) SOCKET_TIMEOUT;
+    timeout.tv_sec = (time_t) 10;
 
 
     if ( setsockopt (descr, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0 )
@@ -325,6 +329,10 @@ void * connection_handler (void * attr) {
                             }
                         }
 
+                        sigemptyset( &set );
+                        sigaddset( &set, SIGUSR1 );
+                        sigprocmask(SIG_UNBLOCK, &set, 0);
+
                         break;
 
                 case 2:
@@ -365,6 +373,10 @@ void * connection_handler (void * attr) {
 
                             }
                         }
+
+                        sigemptyset( &set );
+                        sigaddset( &set, SIGUSR1 );
+                        sigprocmask(SIG_UNBLOCK, &set, 0);
 
                         break;
 
@@ -407,6 +419,10 @@ void * connection_handler (void * attr) {
                             }
                         }
 
+                        sigemptyset( &set );
+                        sigaddset( &set, SIGUSR1 );
+                        sigprocmask(SIG_UNBLOCK, &set, 0);
+
                         break;
                 
                 default:
@@ -434,12 +450,10 @@ void send_seats_view() {
 
     FILE    *f;
 
-    pthread_mutex_lock( &CINEMA_MUTEX );
-
     //open a session on file "cinema", to serve client requests.
 
-    f = fopen( "cinema", "r+" );
-    if (f == NULL)      Error_("error in function: fdopen (send seats view).", 1);
+    f = fopen( "cinema", "r" );
+    if (f == NULL)      Error_("error in function: fopen (send seats view).", 1);
 
 
     //get the file size and add a newline at the end of it.
@@ -474,8 +488,6 @@ void send_seats_view() {
     fflush(stdout);
 
     fclose( f );
-
-    pthread_mutex_unlock( &CINEMA_MUTEX );
     
     return;
 
@@ -485,10 +497,6 @@ void send_seats_view() {
 
 
 void reserve_and_confirm() {
-
-    //validate memory TLS to represent all seats' informations in cinema hall.
-    seats_vector = malloc( sizeof(seat) * 9);
-    if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
 
     char    *l = NULL,      *token;
 
@@ -667,27 +675,32 @@ void reserve_and_confirm() {
 
 void delete_reservation() {
 
-    //validate memory TLS to represent all seats' informations in cinema hall.
-    seats_vector = malloc( sizeof(seat) * 9);
-    if (seats_vector == NULL)       Error_("error in function : malloc.", 1);
+    char    *l = NULL,         *token;
 
-    char    *l = NULL,      *token;
-
-    int     ret; 
+    int     ret,               desc;
     
     size_t len;
 
     seat    *tmp = NULL,       *last = NULL;
 
-    FILE    *f;
+    FILE    *f, *codes;
+
+    //find the code within reservation file 
+    desc = open( "cinema_prenotazioni", O_RDWR, 0660 );
+    if ( desc == -1 )       Error_("error in function: open (delete reservation).", 1);
+    codes = fdopen( desc, "r+" );
+    if (codes == NULL)      Error_("error in function: fdopen (delete reservation).", 1);
 
     //ensure atomicity of transaction.
     pthread_mutex_lock( &CINEMA_MUTEX ); 
 
     f = fopen( "cinema" , "r+" );
-    if (f == NULL)      Error_("error in function: fopen (send seats view).", 1);
+    if (f == NULL)      Error_("error in function: fopen (delete reservation).", 1);
 
     build_cinema( f );
+
+    int bytes = 0;          int codelen = 0;
+
 
     //get the reservation code from the client.
     char reservation_code[MAX_LINE];
@@ -695,24 +708,18 @@ void delete_reservation() {
     ret = Readline( descr, reservation_code, MAX_LINE );
     if (ret == -1)      Error_("error in function : Readline.", 1);
 
-    printf("\n Buffer content : %s", reservation_code);       fflush(stdout);
+    printf("\n Buffer content : %s", reservation_code);       fflush(stdout);  sleep(1);
 
-    //find the code within reservation file and procede with cancellation.
-    FILE *codes = fopen( "cinema_prenotazioni", "r+" );
-
-    int bytes = 0;
-    int codelen = 0;
-    sleep(1);
-    
     ret = get_cancellation_seats( codes, reservation_code, &bytes, &codelen );
 
-    if( ret != 0 )   goto end2;
+    if( ret != 0 )      goto end2;
+    else                printf("reservation found!");
 
     fseek( codes, (bytes - codelen), SEEK_SET);
 
     fputs( "NV", codes );
 
-        //override 'cinema' file with updated reservation values.
+    //override 'cinema' file with updated reservation values.
     do {
         int     _line = reservation_seats -> line;
         int     _place = reservation_seats -> place;
@@ -747,6 +754,7 @@ void delete_reservation() {
 
         } 
     }
+
     fseek( f, 0, SEEK_SET);
     ret = fputs( buffer, f );
     if (ret == -1)      Error_("Error in function : fputs (reserve and confirm)", 1);
@@ -755,7 +763,8 @@ void delete_reservation() {
 
     //release the mutex.
     pthread_mutex_unlock( &CINEMA_MUTEX );
-    fclose( codes );
+    fseek(codes, 0, SEEK_SET);
+    fflush( codes );          fclose( codes );
     free( reservation_seats );
     free( seats_vector );
     printf("\n TRANSACTION COMPLETE. Reservation has been successfully deleted."); fflush(stdout);
@@ -763,7 +772,8 @@ void delete_reservation() {
 
     end2:
     pthread_mutex_unlock( &CINEMA_MUTEX );
-    fclose( codes );
+    fseek(codes, 0, SEEK_SET);
+    fflush( codes );          fclose( codes );
     free( reservation_seats );
     free( seats_vector );
     printf("\n Reservation not found."); fflush(stdout);
@@ -898,7 +908,6 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
 
     seat    *tmp,   *last;
 
-
     while ( getline( &l, &len, codes ) != -1 ) {
 
         *bytes += strlen(l);
@@ -907,7 +916,6 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
         token = strtok( l, "/");
 
         if( strcmp( token, reservation_code ) == 0 ) {
-
 
             reservation_seats = malloc(sizeof(seat));
             if (reservation_seats == NULL) Error_(" Error in function : malloc. (get_cancellation_seats)", 1);
@@ -936,7 +944,7 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
                 tmp -> place = atoi( token );  
                 memset( token, 0, strlen(token));
 
-                tmp -> next = malloc( sizeof(seat));
+                tmp -> next = malloc( sizeof(seat) );
                 if (tmp -> next == NULL)     Error_("error in function : malloc.", 1); 
                 last = tmp;
                 tmp = tmp -> next;
@@ -954,5 +962,15 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
     }
 
     return 1;
+
+}
+
+
+int load_reservation( FILE* codes ) {
+
+    //find the code within reservation file 
+    codes = fopen( "cinema_prenotazioni", "r+" );
+    if (codes == NULL)      return -1;
+    return 0;
 
 }

@@ -1,5 +1,6 @@
 #pragma once
 #define _POSIX_C_SOURCE 199309L
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/socket.h>      
