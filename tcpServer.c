@@ -675,6 +675,12 @@ void reserve_and_confirm() {
 
 void delete_reservation() {
 
+    FILE *codes;
+
+    //find the code within reservation file 
+    codes = fopen( "cinema_prenotazioni", "r+" );
+    if ( codes == NULL )       Error_("error in function: fopen (delete reservation).", 1);
+
     char    *l = NULL,         *token;
 
     int     ret,               desc;
@@ -683,13 +689,7 @@ void delete_reservation() {
 
     seat    *tmp = NULL,       *last = NULL;
 
-    FILE    *f, *codes;
-
-    //find the code within reservation file 
-    desc = open( "cinema_prenotazioni", O_RDWR, 0660 );
-    if ( desc == -1 )       Error_("error in function: open (delete reservation).", 1);
-    codes = fdopen( desc, "r+" );
-    if (codes == NULL)      Error_("error in function: fdopen (delete reservation).", 1);
+    FILE    *f;
 
     //ensure atomicity of transaction.
     pthread_mutex_lock( &CINEMA_MUTEX ); 
@@ -966,11 +966,3 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
 }
 
 
-int load_reservation( FILE* codes ) {
-
-    //find the code within reservation file 
-    codes = fopen( "cinema_prenotazioni", "r+" );
-    if (codes == NULL)      return -1;
-    return 0;
-
-}

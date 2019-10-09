@@ -9,10 +9,44 @@ int                     socket_descriptor;
 char                    status[16] = "not connected.";
 
     
+void sigHandler() {
+
+    sigset_t set;
+    sigemptyset( &set );
+    sigaddset( &set, SIGINT );
+    sigprocmask( SIG_BLOCK, &set, 0 );
+
+    int ret,  asw;
+
+    putchar('\n');
+
+    printf("\n\nDo you really want to exit? (1 for yes) : ");
+
+    ret = scanf( "%d", &asw );
+    if (ret == -1)      Error_("error in function: scanf (sigHandler).", 1);
+    while( getchar() != '\n'){};
+
+    if ( asw == 1 )        goto exit;
+
+    signal( SIGINT, sigHandler );
+    sigprocmask( SIG_UNBLOCK, &set, 0 );
+    display();
+    printf("\n\n     Insert operation code here : ");
+    return;
+
+    exit:
+    exit(EXIT_SUCCESS);
+
+}
 
 
 
 int main (int argc, char** argv) {
+
+    sigset_t set;
+    sigemptyset( &set );
+    sigaddset( &set, SIGINT );
+    signal( SIGINT, sigHandler);
     
     int ret;
 
@@ -43,15 +77,54 @@ int main (int argc, char** argv) {
                     goto gui;
 
         case 1 :
+                    sigprocmask( SIG_BLOCK, &set, 0);
+
                     request_1();
+                    
+                    if( sigpending( &set ) ){
+                        if ( sigismember(&set, SIGINT ) ) {
+                            signal( SIGINT, sigHandler );
+                            sigprocmask( SIG_UNBLOCK, &set, 0 );
+                        }
+                    }
+                    sigemptyset( &set );
+                    sigaddset( &set, SIGINT );
+                    sigprocmask( SIG_UNBLOCK, &set, 0 );
+
                     goto gui;
 
         case 2:     
+                    sigprocmask( SIG_BLOCK, &set, 0);
+
                     request_2();
+
+                    if( sigpending( &set ) ){
+                        if ( sigismember(&set, SIGINT ) ) {
+                            signal( SIGINT, sigHandler );
+                            sigprocmask( SIG_UNBLOCK, &set, 0 );
+                        }
+                    }
+                    sigemptyset( &set );
+                    sigaddset( &set, SIGINT );
+                    sigprocmask( SIG_UNBLOCK, &set, 0 );
+
                     goto gui;
 
         case 3:     
+                    sigprocmask( SIG_BLOCK, &set, 0);
+
                     request_3();
+                    
+                    if( sigpending( &set ) ){
+                        if ( sigismember(&set, SIGINT ) ) {
+                            signal( SIGINT, sigHandler );
+                            sigprocmask( SIG_UNBLOCK, &set, 0 );
+                        }
+                    }
+                    sigemptyset( &set );
+                    sigaddset( &set, SIGINT );
+                    sigprocmask( SIG_UNBLOCK, &set, 0 );
+
                     goto gui;
 
         default:    goto gui;
