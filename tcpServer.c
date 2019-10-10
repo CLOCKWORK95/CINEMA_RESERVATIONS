@@ -506,8 +506,6 @@ void send_seats_view() {
 }
 
 
-
-
 void reserve_and_confirm() {
 
     char    *l = NULL,      *token;
@@ -683,15 +681,7 @@ void reserve_and_confirm() {
 }
 
 
-
-
 void delete_reservation() {
-
-    FILE *codes;
-
-    //find the code within reservation file 
-    codes = fopen( "cinema_prenotazioni", "r+" );
-    if ( codes == NULL )       Error_("error in function: fopen (delete reservation).", 1);
 
     char    *l = NULL,         *token;
 
@@ -701,7 +691,11 @@ void delete_reservation() {
 
     seat    *tmp = NULL,       *last = NULL;
 
-    FILE    *f;
+    FILE    *f, *codes;
+
+    //find the code within reservation file 
+    codes = fopen( "cinema_prenotazioni", "r+" );
+    if ( codes == NULL )       Error_("error in function: fopen (delete reservation).", 1);
 
     //ensure atomicity of transaction.
     pthread_mutex_lock( &CINEMA_MUTEX ); 
@@ -720,7 +714,7 @@ void delete_reservation() {
     ret = Readline( descr, reservation_code, MAX_LINE );
     if (ret == -1)      Error_("error in function : Readline.", 1);
 
-    printf("\n Buffer content : %s", reservation_code);       fflush(stdout);  sleep(1);
+    printf("\n Buffer content : %s", reservation_code);       fflush(stdout);  
 
     ret = get_cancellation_seats( codes, reservation_code, &bytes, &codelen );
 
@@ -792,6 +786,7 @@ void delete_reservation() {
     return;
 
 }
+
 
 
 
@@ -911,19 +906,16 @@ void build_reservation_seats( char * buffer) {
 }
 
 
-int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, int *codelen ) {
+int get_cancellation_seats( FILE *codes, char * reservation_code, int *bytes, int *codelen ) {
 
-    char    *l,     *token = NULL;   
+    char    *l = NULL,     *token = NULL;   
 
     size_t          len;
 
     seat    *tmp,   *last;
 
-    printf("bug?");fflush(stdout);
 
     while ( getline( &l, &len, codes ) != -1 ) {
-
-        printf("bug?");fflush(stdout);
 
         *bytes += strlen(l);
         *codelen = strlen(l);
@@ -972,7 +964,9 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
             } 
             return 0;
             
-        }
+        } 
+        
+        l = NULL; len = (size_t) 0;
     
     }
 

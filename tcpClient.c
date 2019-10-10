@@ -40,7 +40,7 @@ void sigHandler() {
     exit(EXIT_SUCCESS);
 
     run:
-    printf("\nStill running."); fflush(stdout);
+    sigprocmask( SIG_UNBLOCK, &set, 0 );
 
 }
 
@@ -76,10 +76,6 @@ int main (int argc, char** argv) {
                         close( socket_descriptor );
                         memset( status, 0, strlen(status) );
                         sprintf( status, "not connected.");
-
-                        printf("\n CONNECTION CLOSED."); 
-                        fflush(stdout);
-                        sleep(1);
 
                         goto gui; }
 
