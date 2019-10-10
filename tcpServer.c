@@ -919,7 +919,11 @@ int get_cancellation_seats( FILE * codes, char * reservation_code, int *bytes, i
 
     seat    *tmp,   *last;
 
+    printf("bug?");fflush(stdout);
+
     while ( getline( &l, &len, codes ) != -1 ) {
+
+        printf("bug?");fflush(stdout);
 
         *bytes += strlen(l);
         *codelen = strlen(l);
