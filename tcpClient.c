@@ -30,12 +30,14 @@ void sigHandler() {
 
     signal( SIGINT, sigHandler );
     sigprocmask( SIG_UNBLOCK, &set, 0 );
-    display();
-    printf("\n\n     Insert operation code here : ");
-    return;
+    goto run;
 
     exit:
+    unconnect();
     exit(EXIT_SUCCESS);
+
+    run:
+    printf("\nStill running."); fflush(stdout);
 
 }
 
@@ -65,11 +67,17 @@ int main (int argc, char** argv) {
 
         case 0 :    
                     if ( strcmp( "connected.", status) == 0 ) {
+
+                        unconnect();
+
                         close( socket_descriptor );
                         memset( status, 0, strlen(status) );
                         sprintf( status, "not connected.");
-                        printf("\n CONNECTION CLOSED."); fflush(stdout);
+
+                        printf("\n CONNECTION CLOSED."); 
+                        fflush(stdout);
                         sleep(1);
+
                         goto gui; }
 
                     else    try_connection();
@@ -149,11 +157,11 @@ void display() {
     printf("....................................................................................\n");
 	printf("....................................................................................\n\n");
     printf(" STATUS : %s \n", status);
-    printf(" CTRL + C to close connection. \n\n\n");
+    printf(" CTRL + C to exit the application. \n\n\n");
 
 	printf(" _____ ________ ________ ____What are you looking for ?____ ________ _______ _______\n");
 	printf("|                                                                                   |\n");
-    printf("|   OP   0 : Connect to CINEMA RESERVATIONS SERVER.                                 |\n");
+    printf("|   OP   0 : Connect/Unconnect to CINEMA RESERVATIONS SERVER.                       |\n");
     printf("|   OP   1 : View the current state of today's seats reservation.                   |\n");
     printf("|   OP   2 : Reserve some seats for today's show.                                   |\n");
 	printf("|   OP   3 : Delete a reservation.                                                  |\n");
@@ -181,13 +189,30 @@ void try_connection() {
 
     //try to connect to the server.
     ret = connect( socket_descriptor, (struct sockaddr *) &server_address, sizeof( server_address ) );
-    if (ret == -1 )         Error_("error in function: connect.", 1);
+    if (ret == -1 ) {
+        printf("\n\nUnable to get a connection to Cinema Reservations Server. Please, try later.");
+        fflush(stdout);
+        return;
+    }
 
     memset(status, 0, strlen(status));
     strcpy(status, "connected.");
 
 }
 
+
+
+void unconnect(){
+
+    char buff[MAX_LINE];        int ret,        bytes = 0;
+
+    //set the request-code and send it to server.
+    sprintf( buff, "0\n" );
+
+    ret =  Writeline( socket_descriptor,  buff, strlen(buff) );
+    if (ret == -1)      Error_("error in function: Writeline.", 1);
+
+}
 
 
 
@@ -248,7 +273,6 @@ int request_1() {
     return 0;
 
 }
-
 
 
 

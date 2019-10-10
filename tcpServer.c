@@ -270,7 +270,6 @@ void * connection_handler (void * attr) {
     //set socket timeout
     timeout.tv_sec = (time_t) 10;
 
-
     if ( setsockopt (descr, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0 )
         Error_("setsockopt failed\n", 1);
 
@@ -290,7 +289,16 @@ void * connection_handler (void * attr) {
 
             switch(request_code) {
 
+                case 0:
+                        //UNCONNECT
+                        num_conns --;
+                        close( descr );
+                        printf("Thread n°%ld exiting. Connection %d closed.", ( my_conn-> tid ), my_conn_num );
+                        fflush(stdout);
+                        pthread_exit( (void *) 0);
+
                 case 1:
+                        //SEND SEATS VIEW
                         sigprocmask(SIG_BLOCK, &set, 0);
 
                         send_seats_view();
@@ -336,6 +344,7 @@ void * connection_handler (void * attr) {
                         break;
 
                 case 2:
+                        //RESERVE AND CONFIRM
                         sigprocmask(SIG_BLOCK, &set, 0);
 
                         reserve_and_confirm();
@@ -381,6 +390,7 @@ void * connection_handler (void * attr) {
                         break;
 
                 case 3:
+                        //DELETE RESERVATION
                         sigprocmask(SIG_BLOCK, &set, 0);
 
                         delete_reservation();

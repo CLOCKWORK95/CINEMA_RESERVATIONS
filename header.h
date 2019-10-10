@@ -46,6 +46,8 @@ void display();
 
 void try_connection();
 
+void unconnect();
+
 int request_1();
 
 int request_2();
