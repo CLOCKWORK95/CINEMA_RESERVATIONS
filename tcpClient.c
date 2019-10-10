@@ -9,6 +9,9 @@ int                     socket_descriptor;
 char                    status[16] = "not connected.";
 
     
+/*  This is the SIGINT handler. It is used to ensure the correct 
+    application exit, by informing server side about the closure 
+    of the channel. */
 void sigHandler() {
 
     sigset_t set;
@@ -147,7 +150,7 @@ int main (int argc, char** argv) {
 
 
 
-
+/*  By this function, the thin-client menu is printed on stdout. */
 void display() {
 
     printf("\e[1;1H\e[2J");
@@ -172,7 +175,7 @@ void display() {
 }
 
 
-
+/*  Connect to CINEMA RESERVATION Server */
 void try_connection() {
 
     int ret;
@@ -201,7 +204,7 @@ void try_connection() {
 }
 
 
-
+/*  Close the connection to CINEMA RESERVATION Server */
 void unconnect(){
 
     char buff[MAX_LINE];        int ret,        bytes = 0;
@@ -215,7 +218,7 @@ void unconnect(){
 }
 
 
-
+/*  RETRIVE CURRENT CINEMA SEATS VIEW */
 int request_1() {
 
 
@@ -276,7 +279,7 @@ int request_1() {
 
 
 
-
+/*  FORWARD A RESERVATION REQUEST */
 int request_2() {
 
     int ret, numSeats, LINE, PLACE;        char buff[MAX_LINE];
@@ -343,7 +346,7 @@ int request_2() {
 
 
 
-
+/*  FORWARD A CANCELLATION REQUEST */
 int request_3() {
 
     char buff[MAX_LINE];        int ret,        bytes = 0;

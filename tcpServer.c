@@ -15,7 +15,7 @@ pthread_mutex_t         EXIT_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 struct sockaddr_in      my_address,     their_address;
                                                         
 
-//define linked list for dynamic memory allocation of client-server connections.
+//Linked-list for dynamic memory allocation of client-server connections.
 typedef struct concurrent_connection_ {
 
     int                                     sock_descr;
@@ -28,10 +28,6 @@ typedef struct concurrent_connection_ {
 
 
 
-//index used by the secure_exit signal handler to identify the exiting thread.
-int exit_index = 0;
-
-
 //Thread Local Storage.
 __thread int    descr,       my_conn_num,       file_descriptor;    
 
@@ -41,13 +37,16 @@ __thread concurrent_connection                  *my_conn;
 
 
 
-//secure-exit semaphore for main thread.
+//Semaphore_array ID for main thread's secure exit.
 int sem_id;
 
+//Index used by the secure_exit signal handler to identify the current-exiting-thread.
+int exit_index = 0;
 
 
 
 
+/*  FUNCTIONS' DECLARATIONS. */
 void * connection_handler ( void * attr);
 
 void send_seats_view();
@@ -66,7 +65,7 @@ int get_cancellation_seats();
 
 
 
-
+/*  SIGINT Handler */
 void sigHandler( int signo ){
 
     //temporarily block SIGINT occurrences.
@@ -96,7 +95,7 @@ void sigHandler( int signo ){
 }
 
 
-
+/*  SIGUSR1 Handler */
 void secureExit( int signo ) {
 
     sigset_t set;
@@ -136,7 +135,9 @@ void secureExit( int signo ) {
 
 
 
-
+/*  Main thread sets up a welcome socket and maps on a well-known port. 
+    Accepts connections and delegates connection_handler threads serving 
+    requests. */
 int main (int argc, char** argv){
 
     int ret,    addrlen;
@@ -234,7 +235,7 @@ int main (int argc, char** argv){
 
 
 
-
+/*  Concurrent-thread handling a connection to client. */
 void * connection_handler (void * attr) {
 
     int             ret,    request_code;
@@ -446,6 +447,7 @@ void * connection_handler (void * attr) {
             
 
 }
+
 
 
 
@@ -790,7 +792,6 @@ void delete_reservation() {
     return;
 
 }
-
 
 
 
