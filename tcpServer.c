@@ -269,7 +269,7 @@ void * connection_handler (void * attr) {
     struct timeval timeout; 
 
     //set socket timeout
-    timeout.tv_sec = (time_t) 10;
+    timeout.tv_sec = (time_t) 20;
 
     if ( setsockopt (descr, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)) < 0 )
         Error_("setsockopt failed\n", 1);
